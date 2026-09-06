@@ -24,10 +24,9 @@ It never modifies or resets the user-managed `vyos-build` checkout.
 | Hard-coded build and vCenter values | Defaults, ignored local JSON, then environment |
 | Root-level OVA and temporary files | Structured ignored artifact directory |
 
-Existing deployed automation can transition gradually: the guest script also
-accepts the legacy property keys `mgmt_ip`, `mgmt_mask`, `mgmt_gw`,
-`enable_rest`, `rest_api_key`, and `config_blob`. New OVAs publish only the new,
-descriptive names.
+The refactored project intentionally does not retain aliases for the original
+property names. It publishes the same `guestinfo.*` convention used by the
+other appliance builders in the lab.
 
 ## Configuration model
 
@@ -147,28 +146,22 @@ SHA-256 are pinned in `bom/vyos-ova-builder-bom.json`.
 The property definitions are maintained in `templates/vapp-properties.json`.
 Password properties have deliberately empty OVA defaults.
 
-| Property | Purpose | Default |
+| OVF environment key | Purpose | Default |
 | --- | --- | --- |
-| `hostname` | VyOS hostname | `vyos` |
-| `management_interface` | Management NIC | `eth0` |
-| `management_ipv4_address` | Static address; empty selects DHCP | empty |
-| `management_ipv4_prefix_length` | Static address prefix | `24` |
-| `management_ipv4_gateway` | Optional default gateway | empty |
-| `vyos_password` | Password for the `vyos` user | empty, masked |
-| `enable_ssh` | Enable SSH | `false` |
-| `enable_api` | Enable the HTTPS REST API | `false` |
-| `api_key` | Required when the API is enabled | empty, masked |
-| `api_allowed_network` | Optional HTTPS allow-list prefix | empty |
-| `config_commands_base64` | Base64-encoded extra VyOS configuration | empty |
-
-Extra configuration is parsed into arguments without shell evaluation. Each
-non-comment line must begin with `set`, `delete`, or `comment`; all changes are
-committed and saved in one VyOS configuration session.
+| `guestinfo.hostname` | VyOS hostname | `vyos` |
+| `guestinfo.password` | Password for the `vyos` user | empty, masked |
+| `guestinfo.ipaddress` | Static address; empty or `dhcp` selects DHCP | empty |
+| `guestinfo.netmask` | Prefix length or dotted netmask | `24` |
+| `guestinfo.gateway` | Optional default gateway | empty |
+| `guestinfo.dns` | Comma- or space-separated DNS servers | empty |
+| `guestinfo.domain` | DNS domain | empty |
+| `guestinfo.ntp` | Comma- or space-separated NTP servers | empty |
+| `guestinfo.vlan` | Optional VLAN ID on `eth0` | empty |
+| `guestinfo.ssh` | Enable SSH | `false` |
 
 ## Security
 
-- No vCenter password or VyOS API key is committed or built into the OVA.
-- A requested API service fails closed when no API key was supplied.
+- No vCenter or VyOS password is committed or built into the OVA.
 - Secret configuration is redacted from diagnostics and manifests.
 - `config/local.json`, environment files, downloaded packages, and built images
   are excluded by `.gitignore`.

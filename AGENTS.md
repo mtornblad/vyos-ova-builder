@@ -38,9 +38,10 @@ from VyOS sources and adds first-boot configuration through vApp properties.
 - All VyOS changes must run through a single configuration session followed by
   `commit` and `save`.
 - A failed initialization must not create the completion marker.
-- Enabling the HTTPS API must never create or fall back to a known API key.
-- Arbitrary shell commands from vApp properties are prohibited. Only validated
-  VyOS configuration commands may be accepted.
+- Published vApp properties use the shared `guestinfo.*` naming convention.
+- Do not add legacy property aliases unless a migration requirement is agreed.
+- vApp values must be passed to VyOS CLI functions as quoted arguments and
+  must never be evaluated as shell code.
 
 ## Testing
 

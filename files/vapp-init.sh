@@ -10,8 +10,7 @@ export VYATTA_PAGER=cat
 
 readonly MARKER_DIR="/opt/vyos-ova-builder"
 readonly MARKER_FILE="${MARKER_DIR}/vapp-configured"
-COMMAND_FILE=""
-ARGUMENT_FILE=""
+readonly BASE_INTERFACE="eth0"
 
 exec > >(logger -t vyos-vapp-init) 2>&1
 
@@ -27,8 +26,6 @@ fail() {
 source /opt/vyatta/etc/functions/script-template
 
 cleanup() {
-    [[ -z "$COMMAND_FILE" ]] || rm -f -- "$COMMAND_FILE"
-    [[ -z "$ARGUMENT_FILE" ]] || rm -f -- "$ARGUMENT_FILE"
     if cli-shell-api inSession; then
         discard >/dev/null 2>&1 || true
     fi
@@ -49,20 +46,9 @@ get_ovf_property() {
     local key="$1"
     local element
     local value
-    element="$(printf '%s' "$OVF_ENV" | sed 's/></>\n</g' | grep -F "oe:key=\"vapp.${key}\"" | head -n 1 || true)"
+    element="$(printf '%s' "$OVF_ENV" | sed 's/></>\n</g' | grep -F "oe:key=\"guestinfo.${key}\"" | head -n 1 || true)"
     value="$(printf '%s' "$element" | sed -n 's/.*oe:value="\([^"]*\)".*/\1/p')"
     xml_decode "$value"
-}
-
-get_property_with_legacy_name() {
-    local current_key="$1"
-    local legacy_key="$2"
-    local value
-    value="$(get_ovf_property "$current_key")"
-    if [[ -z "$value" && -n "$legacy_key" ]]; then
-        value="$(get_ovf_property "$legacy_key")"
-    fi
-    printf '%s' "$value"
 }
 
 is_true() {
@@ -72,92 +58,54 @@ is_true() {
     esac
 }
 
-apply_additional_commands() {
-    local encoded="$1"
-    local command
-    local -a arguments
-    local applied=0
-
-    [[ -z "$encoded" ]] && return 0
-    COMMAND_FILE="$(mktemp)"
-    ARGUMENT_FILE="$(mktemp)"
-    if ! printf '%s' "$encoded" | base64 --decode >"$COMMAND_FILE" 2>/dev/null; then
-        fail "config_commands_base64 is not valid Base64"
+prefix_from_netmask() {
+    local netmask="$1"
+    local prefix
+    if [[ "$netmask" =~ ^([0-9]|[12][0-9]|3[0-2])$ ]]; then
+        printf '%s' "$netmask"
+        return 0
     fi
-
-    while IFS= read -r command || [[ -n "$command" ]]; do
-        command="${command#"${command%%[![:space:]]*}"}"
-        command="${command%"${command##*[![:space:]]}"}"
-        [[ -z "$command" || "$command" == \#* ]] && continue
-
-        if ! printf '%s\n' "$command" | python3 -c '
-import shlex
+    if ! prefix="$(python3 -c '
+import ipaddress
 import sys
 
 try:
-    arguments = shlex.split(sys.stdin.read(), comments=False, posix=True)
-except ValueError as error:
-    print(error, file=sys.stderr)
+    print(ipaddress.IPv4Network(f"0.0.0.0/{sys.argv[1]}").prefixlen)
+except (ipaddress.NetmaskValueError, ipaddress.AddressValueError):
     raise SystemExit(1)
-
-for argument in arguments:
-    sys.stdout.buffer.write(argument.encode("utf-8") + b"\0")
-' >"$ARGUMENT_FILE"; then
-            fail "additional configuration contains invalid quoting"
-        fi
-
-        arguments=()
-        mapfile -d '' -t arguments <"$ARGUMENT_FILE"
-        if [[ ${#arguments[@]} -eq 0 ]]; then
-            continue
-        fi
-        case "${arguments[0]}" in
-            set|delete|comment) ;;
-            *)
-                fail "additional configuration contains a command other than set, delete, or comment"
-                ;;
-        esac
-
-        "${arguments[@]}"
-        applied=$((applied + 1))
-    done <"$COMMAND_FILE"
-
-    rm -f -- "$COMMAND_FILE" "$ARGUMENT_FILE"
-    COMMAND_FILE=""
-    ARGUMENT_FILE=""
-    log "Applied ${applied} additional VyOS configuration command(s)."
+' "$netmask")"; then
+        fail "guestinfo.netmask must be a prefix length or dotted IPv4 netmask"
+    fi
+    printf '%s' "$prefix"
 }
 
-log "Waiting for VMware vApp properties."
+log "Waiting for VMware guestinfo vApp properties."
 OVF_ENV="$(vmtoolsd --cmd 'info-get guestinfo.ovfEnv' 2>/dev/null || true)"
 if [[ -z "$OVF_ENV" || "$OVF_ENV" == *"No value found"* ]]; then
     fail "VMware Tools did not return a vApp environment"
 fi
 
 HOSTNAME_VALUE="$(get_ovf_property hostname)"
-MANAGEMENT_INTERFACE="$(get_ovf_property management_interface)"
-MANAGEMENT_ADDRESS="$(get_property_with_legacy_name management_ipv4_address mgmt_ip)"
-MANAGEMENT_PREFIX="$(get_property_with_legacy_name management_ipv4_prefix_length mgmt_mask)"
-MANAGEMENT_GATEWAY="$(get_property_with_legacy_name management_ipv4_gateway mgmt_gw)"
-VYOS_PASSWORD="$(get_ovf_property vyos_password)"
-ENABLE_SSH="$(get_ovf_property enable_ssh)"
-ENABLE_API="$(get_property_with_legacy_name enable_api enable_rest)"
-API_KEY="$(get_property_with_legacy_name api_key rest_api_key)"
-API_ALLOWED_NETWORK="$(get_ovf_property api_allowed_network)"
-CONFIG_COMMANDS="$(get_property_with_legacy_name config_commands_base64 config_blob)"
+PASSWORD_VALUE="$(get_ovf_property password)"
+IP_ADDRESS_VALUE="$(get_ovf_property ipaddress)"
+NETMASK_VALUE="$(get_ovf_property netmask)"
+GATEWAY_VALUE="$(get_ovf_property gateway)"
+DNS_VALUE="$(get_ovf_property dns)"
+DOMAIN_VALUE="$(get_ovf_property domain)"
+NTP_VALUE="$(get_ovf_property ntp)"
+VLAN_VALUE="$(get_ovf_property vlan)"
+SSH_VALUE="$(get_ovf_property ssh)"
 
 HOSTNAME_VALUE="${HOSTNAME_VALUE:-vyos}"
-MANAGEMENT_INTERFACE="${MANAGEMENT_INTERFACE:-eth0}"
-MANAGEMENT_PREFIX="${MANAGEMENT_PREFIX:-24}"
+NETMASK_VALUE="${NETMASK_VALUE:-24}"
 
-if [[ -n "$MANAGEMENT_ADDRESS" && ! "$MANAGEMENT_PREFIX" =~ ^([0-9]|[12][0-9]|3[0-2])$ ]]; then
-    fail "management_ipv4_prefix_length must be between 0 and 32"
+if [[ -n "$VLAN_VALUE" ]]; then
+    if [[ ! "$VLAN_VALUE" =~ ^[0-9]+$ ]] || (( 10#$VLAN_VALUE < 1 || 10#$VLAN_VALUE > 4094 )); then
+        fail "guestinfo.vlan must be empty or between 1 and 4094"
+    fi
 fi
-if [[ -z "$MANAGEMENT_ADDRESS" && -n "$MANAGEMENT_GATEWAY" ]]; then
-    fail "management_ipv4_gateway requires a static management address"
-fi
-if is_true "$ENABLE_API" && [[ -z "$API_KEY" ]]; then
-    fail "api_key is required when enable_api is true"
+if [[ -n "$GATEWAY_VALUE" && ( -z "$IP_ADDRESS_VALUE" || "${IP_ADDRESS_VALUE,,}" == "dhcp" ) ]]; then
+    fail "guestinfo.gateway requires a static guestinfo.ipaddress"
 fi
 
 while ! systemctl is-active --quiet vyos-router.service; do
@@ -172,43 +120,56 @@ configure
 
 set system host-name "$HOSTNAME_VALUE"
 
-if [[ -n "$MANAGEMENT_ADDRESS" ]]; then
-    log "Applying static management addressing to ${MANAGEMENT_INTERFACE}."
-    delete interfaces ethernet "$MANAGEMENT_INTERFACE" address dhcp || true
-    set interfaces ethernet "$MANAGEMENT_INTERFACE" address "${MANAGEMENT_ADDRESS}/${MANAGEMENT_PREFIX}"
-    if [[ -n "$MANAGEMENT_GATEWAY" ]]; then
-        set protocols static route 0.0.0.0/0 next-hop "$MANAGEMENT_GATEWAY"
-    fi
+INTERFACE_PATH=(interfaces ethernet "$BASE_INTERFACE")
+if [[ -n "$VLAN_VALUE" ]]; then
+    log "Configuring management on ${BASE_INTERFACE}.${VLAN_VALUE}."
+    delete interfaces ethernet "$BASE_INTERFACE" address || true
+    INTERFACE_PATH+=(vif "$VLAN_VALUE")
 else
-    log "Using DHCP on ${MANAGEMENT_INTERFACE}."
-    set interfaces ethernet "$MANAGEMENT_INTERFACE" address dhcp
+    log "Configuring management on ${BASE_INTERFACE}."
 fi
 
-if is_true "$ENABLE_SSH"; then
+delete "${INTERFACE_PATH[@]}" address || true
+if [[ -z "$IP_ADDRESS_VALUE" || "${IP_ADDRESS_VALUE,,}" == "dhcp" ]]; then
+    set "${INTERFACE_PATH[@]}" address dhcp
+else
+    PREFIX_VALUE="$(prefix_from_netmask "$NETMASK_VALUE")"
+    set "${INTERFACE_PATH[@]}" address "${IP_ADDRESS_VALUE}/${PREFIX_VALUE}"
+    if [[ -n "$GATEWAY_VALUE" ]]; then
+        set protocols static route 0.0.0.0/0 next-hop "$GATEWAY_VALUE"
+    fi
+fi
+
+if [[ -n "$DOMAIN_VALUE" ]]; then
+    set system domain-name "$DOMAIN_VALUE"
+fi
+
+if [[ -n "$DNS_VALUE" ]]; then
+    DNS_SERVERS=()
+    read -r -a DNS_SERVERS <<<"${DNS_VALUE//,/ }"
+    for DNS_SERVER in "${DNS_SERVERS[@]}"; do
+        set system name-server "$DNS_SERVER"
+    done
+fi
+
+if [[ -n "$NTP_VALUE" ]]; then
+    NTP_SERVERS=()
+    read -r -a NTP_SERVERS <<<"${NTP_VALUE//,/ }"
+    for NTP_SERVER in "${NTP_SERVERS[@]}"; do
+        set service ntp server "$NTP_SERVER"
+    done
+fi
+
+if [[ -n "$PASSWORD_VALUE" ]]; then
+    log "Setting the vyos account password."
+    set system login user vyos authentication plaintext-password "$PASSWORD_VALUE"
+fi
+
+if is_true "$SSH_VALUE"; then
     set service ssh port 22
 else
     delete service ssh || true
 fi
-
-if is_true "$ENABLE_API"; then
-    log "Enabling the VyOS HTTPS API."
-    set service https api rest
-    set service https api keys id vis key "$API_KEY"
-    set service https port 443
-    if [[ -n "$API_ALLOWED_NETWORK" ]]; then
-        set service https allow-client address "$API_ALLOWED_NETWORK"
-    fi
-else
-    delete service https api rest || true
-    delete service https api keys id vis || true
-fi
-
-if [[ -n "$VYOS_PASSWORD" ]]; then
-    log "Setting the vyos account password."
-    set system login user vyos authentication plaintext-password "$VYOS_PASSWORD"
-fi
-
-apply_additional_commands "$CONFIG_COMMANDS"
 
 log "Committing first-boot configuration."
 commit || fail "VyOS rejected the generated configuration"
