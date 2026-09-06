@@ -1,0 +1,39 @@
+# Generated artifacts and downloaded dependencies
+/artifacts/**
+!/artifacts/README.md
+
+# Private, environment-specific configuration
+/config/local.json
+/config/*.local.json
+.env
+.env.*
+!.env.example
+
+# Legacy local payloads
+/docker/*.deb
+/output-*/
+*.iso
+*.ova
+*.ovf
+*.mf
+*.vmdk
+*.qcow2
+*.raw
+
+# Build and test state
+packer_cache/
+.packer.d/
+*.log
+*.pid
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# Editors and operating systems
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

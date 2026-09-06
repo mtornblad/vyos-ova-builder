@@ -1,0 +1,13 @@
+{
+  "schema": "vyos.ova.builder.bom/v1",
+  "dependencies": [
+    {
+      "name": "syft",
+      "version": "1.51.1",
+      "architecture": "amd64",
+      "filename": "syft_1.51.1_linux_amd64.deb",
+      "url": "https://github.com/anchore/syft/releases/download/v1.51.1/syft_1.51.1_linux_amd64.deb",
+      "sha256": "3372c35ac0d3626c00d99e90955e11715cf2557814460ecf8889ecdc2e2a3879"
+    }
+  ]
+}

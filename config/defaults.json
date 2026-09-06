@@ -1,0 +1,45 @@
+{
+  "schema": "vyos.ova.builder.config/v1",
+  "source": {
+    "repository": "https://github.com/vyos/vyos-build.git",
+    "branch": "rolling",
+    "revision": "",
+    "directory": ""
+  },
+  "build": {
+    "architecture": "amd64",
+    "build_by": "vyos-ova-builder",
+    "build_type": "development",
+    "flavor": "vmware-vapp",
+    "docker_base_image": "vyos/vyos-build:current",
+    "docker_image": "vyos-ova-builder:local",
+    "custom_packages": [
+      "open-vm-tools"
+    ]
+  },
+  "appliance": {
+    "ova_name": "vyos-vmware-vapp.ova",
+    "display_name": "VyOS Router",
+    "guest_os": "debian12-64",
+    "hardware_version": 19,
+    "cpus": 2,
+    "memory_mb": 2048,
+    "disk_controller": "pvscsi",
+    "network_adapters": 2,
+    "network_name": "VM Network"
+  },
+  "vapp": {
+    "properties_file": "templates/vapp-properties.json"
+  },
+  "upload": {
+    "vcenter_url": "",
+    "username": "",
+    "password": "",
+    "insecure": false,
+    "content_library": "",
+    "template_name": "VyOS Router"
+  },
+  "paths": {
+    "artifacts": "artifacts"
+  }
+}

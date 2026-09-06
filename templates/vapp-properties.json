@@ -1,0 +1,87 @@
+{
+  "schema": "vyos.ova.builder.vapp-properties/v1",
+  "class": "vapp",
+  "info": "VyOS first-boot configuration",
+  "product": "VyOS Router",
+  "properties": [
+    {
+      "key": "hostname",
+      "type": "string",
+      "label": "Hostname",
+      "description": "VyOS system hostname.",
+      "value": "vyos"
+    },
+    {
+      "key": "management_interface",
+      "type": "string",
+      "label": "Management interface",
+      "description": "VyOS interface used for management.",
+      "value": "eth0"
+    },
+    {
+      "key": "management_ipv4_address",
+      "type": "string",
+      "label": "Management IPv4 address",
+      "description": "Leave empty to use DHCP.",
+      "value": ""
+    },
+    {
+      "key": "management_ipv4_prefix_length",
+      "type": "uint8",
+      "label": "Management IPv4 prefix length",
+      "description": "IPv4 prefix length from 0 through 32. Required with a static address.",
+      "value": "24"
+    },
+    {
+      "key": "management_ipv4_gateway",
+      "type": "string",
+      "label": "Management IPv4 gateway",
+      "description": "Optional default IPv4 gateway.",
+      "value": ""
+    },
+    {
+      "key": "vyos_password",
+      "type": "string",
+      "label": "VyOS password",
+      "description": "Optional password for the vyos account.",
+      "value": "",
+      "password": true
+    },
+    {
+      "key": "enable_ssh",
+      "type": "boolean",
+      "label": "Enable SSH",
+      "description": "Enable the VyOS SSH service.",
+      "value": "false"
+    },
+    {
+      "key": "enable_api",
+      "type": "boolean",
+      "label": "Enable HTTPS API",
+      "description": "Enable the VyOS REST API. An API key must be supplied.",
+      "value": "false"
+    },
+    {
+      "key": "api_key",
+      "type": "string",
+      "label": "HTTPS API key",
+      "description": "Required when the HTTPS API is enabled.",
+      "value": "",
+      "password": true
+    },
+    {
+      "key": "api_allowed_network",
+      "type": "string",
+      "label": "HTTPS API allowed network",
+      "description": "Optional IPv4 or IPv6 host/prefix allowed to access the HTTPS service.",
+      "value": ""
+    },
+    {
+      "key": "config_commands_base64",
+      "type": "string",
+      "label": "Additional VyOS configuration",
+      "description": "Optional Base64-encoded set, delete, or comment commands.",
+      "value": ""
+    }
+  ]
+}

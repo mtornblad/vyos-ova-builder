@@ -1,0 +1,2 @@
+# VMware virtual disk image used as input to the OVA packaging stage.
+image_format = "vmdk"

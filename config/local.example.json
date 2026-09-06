@@ -1,0 +1,21 @@
+{
+  "schema": "vyos.ova.builder.config/v1",
+  "source": {
+    "directory": "../vyos-build",
+    "branch": "rolling"
+  },
+  "build": {
+    "build_by": "builder@example.invalid"
+  },
+  "upload": {
+    "vcenter_url": "https://vcenter.example.invalid",
+    "username": "",
+    "password": "",
+    "insecure": false,
+    "content_library": "",
+    "template_name": "VyOS Router"
+  },
+  "paths": {
+    "artifacts": "../../artifacts/vyos"
+  }
+}

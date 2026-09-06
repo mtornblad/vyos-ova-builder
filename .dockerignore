@@ -1,0 +1,11 @@
+.git
+.github
+artifacts
+config/local.json
+config/*.local.json
+tests
+*.iso
+*.ova
+*.ovf
+*.vmdk
+*.log
