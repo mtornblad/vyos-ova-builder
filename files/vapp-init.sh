@@ -20,15 +20,25 @@ log() {
 
 fail() {
     log "ERROR: $*"
-    exit 1
+    builtin exit 1
 }
 
 source /opt/vyatta/etc/functions/script-template
 
 cleanup() {
+    local exit_status=$?
+
+    # Avoid recursively invoking this trap when the cleanup is complete.
+    trap - EXIT
+
     if cli-shell-api inSession; then
-        discard >/dev/null 2>&1 || true
+        if (( exit_status != 0 )); then
+            discard >/dev/null 2>&1 || true
+        fi
+        cli-shell-api teardownSession >/dev/null 2>&1 || true
     fi
+
+    builtin exit "$exit_status"
 }
 trap cleanup EXIT
 
@@ -177,6 +187,5 @@ save || fail "VyOS configuration could not be saved"
 
 install -d -m 0700 "$MARKER_DIR"
 touch "$MARKER_FILE"
-trap - EXIT
 log "VMware vApp configuration completed successfully."
-exit 0
+builtin exit 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -23,6 +24,19 @@ class SecurityContractTests(unittest.TestCase):
             "config_blob",
         ):
             self.assertNotIn(legacy_name, script)
+
+    def test_first_boot_script_closes_the_configuration_session(self) -> None:
+        script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
+        self.assertIn("trap cleanup EXIT", script)
+        self.assertIn("cli-shell-api teardownSession", script)
+        self.assertIn("builtin exit 1", script)
+        self.assertIn("builtin exit 0", script)
+        self.assertIsNone(re.search(r"(?m)^\s*exit\s+[01]\s*$", script))
+
+    def test_first_boot_service_uses_vyattacfg_as_primary_group(self) -> None:
+        service = (PROJECT_ROOT / "files" / "vapp-init.service").read_text(encoding="utf-8")
+        self.assertRegex(service, r"(?m)^User=root$")
+        self.assertRegex(service, r"(?m)^Group=vyattacfg$")
 
     def test_every_password_property_has_an_empty_default(self) -> None:
         template = json.loads(

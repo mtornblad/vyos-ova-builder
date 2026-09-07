@@ -9,6 +9,8 @@ StartLimitBurst=10
 
 [Service]
 Type=oneshot
+User=root
+Group=vyattacfg
 ExecStart=/usr/local/sbin/vyos-vapp-init
 TimeoutStartSec=10min
 Restart=on-failure
