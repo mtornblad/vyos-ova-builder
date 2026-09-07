@@ -21,9 +21,33 @@ from project_config import (  # noqa: E402
 
 class ProjectConfigTests(unittest.TestCase):
     def test_defaults_are_valid(self) -> None:
-        config = load_config(environ={})
+        config = load_config(environ={}, include_default_local=False)
         self.assertEqual(config["schema"], "vyos.ova.builder.config/v1")
         self.assertEqual(config["build"]["architecture"], "amd64")
+
+    def test_implicit_local_config_can_be_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_name:
+            project_root = Path(temporary_name)
+            config_directory = project_root / "config"
+            config_directory.mkdir()
+            (config_directory / "defaults.json").write_text(
+                (PROJECT_ROOT / "config" / "defaults.json").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            (config_directory / "local.json").write_text(
+                json.dumps({"upload": {"vcenter_url": "https://local.example.invalid"}}),
+                encoding="utf-8",
+            )
+
+            with_local = load_config(environ={}, project_root=project_root)
+            defaults_only = load_config(
+                environ={},
+                project_root=project_root,
+                include_default_local=False,
+            )
+
+        self.assertEqual(with_local["upload"]["vcenter_url"], "https://local.example.invalid")
+        self.assertEqual(defaults_only["upload"]["vcenter_url"], "")
 
     def test_precedence_is_defaults_then_local_then_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_name:
@@ -74,24 +98,24 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(result))
 
     def test_upload_validation_requires_all_target_values(self) -> None:
-        config = load_config(environ={})
+        config = load_config(environ={}, include_default_local=False)
         with self.assertRaisesRegex(ConfigurationError, "upload.vcenter_url"):
             validate_config(config, require_upload=True)
 
     def test_flavor_cannot_escape_build_flavor_directory(self) -> None:
-        config = copy.deepcopy(load_config(environ={}))
+        config = copy.deepcopy(load_config(environ={}, include_default_local=False))
         config["build"]["flavor"] = "../generic"
         with self.assertRaisesRegex(ConfigurationError, "filename-safe"):
             validate_config(config)
 
     def test_arm64_is_rejected_until_a_matching_dependency_is_pinned(self) -> None:
-        config = copy.deepcopy(load_config(environ={}))
+        config = copy.deepcopy(load_config(environ={}, include_default_local=False))
         config["build"]["architecture"] = "arm64"
         with self.assertRaisesRegex(ConfigurationError, "currently pinned"):
             validate_config(config)
 
     def test_unknown_private_setting_is_not_silently_ignored(self) -> None:
-        config = copy.deepcopy(load_config(environ={}))
+        config = copy.deepcopy(load_config(environ={}, include_default_local=False))
         config["upload"]["passwrod"] = "typo"
         with self.assertRaisesRegex(ConfigurationError, "Unknown upload"):
             validate_config(config)

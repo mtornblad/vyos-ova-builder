@@ -104,7 +104,10 @@ VYOS_OVA_BUILD_BY=builder@example.invalid \
 ```
 
 Only committed revisions from a configured local source checkout are used.
-Set `VYOS_OVA_SOURCE_REVISION` to pin a specific commit or tag.
+For `source.directory`, the default is that checkout's exact `HEAD`, including
+a detached submodule HEAD; uncommitted files are ignored. Set
+`VYOS_OVA_SOURCE_REVISION` to select another committed revision explicitly.
+`source.branch` is used when cloning `source.repository` directly.
 The currently pinned Syft package is for `amd64`; other architectures are
 rejected until a matching package and checksum are added to the BOM.
 

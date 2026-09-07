@@ -42,7 +42,7 @@ class DownloadDependencyTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            config = copy.deepcopy(load_config(environ={}))
+            config = copy.deepcopy(load_config(environ={}, include_default_local=False))
             config["paths"]["artifacts"] = str(temporary / "artifacts")
 
             resolved = ensure_dependencies(config, bom_path=bom)

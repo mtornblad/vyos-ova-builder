@@ -90,11 +90,40 @@ def source_location(config: Mapping[str, Any]) -> str:
     return str(config["source"]["repository"])
 
 
+def source_reference(config: Mapping[str, Any], location: str) -> str:
+    """Select a source reference without losing a pinned local checkout.
+
+    A local source directory is normally the ``vyos-build`` submodule from the
+    umbrella repository.  Its checked-out HEAD is the umbrella's pin and may be
+    detached, so resolve that commit in the source repository instead of
+    assuming a local branch exists.  An explicitly configured revision still
+    takes precedence.
+    """
+
+    revision = str(config["source"].get("revision", "")).strip()
+    configured_directory = str(config["source"].get("directory", "")).strip()
+    if configured_directory:
+        requested = revision or "HEAD"
+        try:
+            return capture(
+                ["git", "-C", location, "rev-parse", "--verify", f"{requested}^{{commit}}"]
+            )
+        except subprocess.CalledProcessError as error:
+            raise BuildError(
+                f"Unable to resolve local VyOS source revision {requested!r}"
+            ) from error
+
+    if revision:
+        return revision
+    return f"refs/heads/{str(config['source']['branch']).strip()}"
+
+
 def prepare_source(config: Mapping[str, Any]) -> tuple[Path, str]:
     paths = artifact_paths(config)
     mirror = paths["sources"] / "vyos-build.git"
     checkout = paths["work"] / "vyos-build"
     location = source_location(config)
+    reference = source_reference(config, location)
     paths["sources"].mkdir(parents=True, exist_ok=True)
     paths["work"].mkdir(parents=True, exist_ok=True)
 
@@ -112,9 +141,6 @@ def prepare_source(config: Mapping[str, Any]) -> tuple[Path, str]:
             display=["git", "clone", "--mirror", "<source>", str(mirror)],
         )
 
-    revision = str(config["source"].get("revision", "")).strip()
-    branch = str(config["source"].get("branch", "")).strip()
-    reference = revision or f"refs/heads/{branch}"
     try:
         commit = capture(
             ["git", "--git-dir", str(mirror), "rev-parse", "--verify", f"{reference}^{{commit}}"]

@@ -73,7 +73,7 @@ class CreateOvaTests(unittest.TestCase):
                 ova_module.load_vapp_template(path)
 
     def test_vmx_contains_requested_number_of_nics_and_escapes_values(self) -> None:
-        config = copy.deepcopy(load_config(environ={}))
+        config = copy.deepcopy(load_config(environ={}, include_default_local=False))
         config["appliance"]["network_adapters"] = 3
         config["appliance"]["display_name"] = 'VyOS "Lab"'
         vmx = ova_module.render_vmx(config, "disk.vmdk")
@@ -86,7 +86,7 @@ class CreateOvaTests(unittest.TestCase):
             temporary = Path(temporary_name)
             input_disk = temporary / "input.vmdk"
             input_disk.write_bytes(b"input-vmdk")
-            config = copy.deepcopy(load_config(environ={}))
+            config = copy.deepcopy(load_config(environ={}, include_default_local=False))
             config["paths"]["artifacts"] = str(temporary / "artifacts")
             config["vapp"]["properties_file"] = str(
                 PROJECT_ROOT / "templates" / "vapp-properties.json"

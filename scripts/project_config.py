@@ -116,8 +116,14 @@ def load_config(
     environ: Mapping[str, str] | None = None,
     project_root: Path = PROJECT_ROOT,
     defaults_path: Path | None = None,
+    include_default_local: bool = True,
 ) -> dict[str, Any]:
-    """Load defaults, optional local JSON, and environment overrides."""
+    """Load defaults, optional local JSON, and environment overrides.
+
+    ``include_default_local=False`` skips the implicit ``config/local.json``.
+    Explicitly selected configuration files are still loaded. This keeps unit
+    tests deterministic without changing normal command-line behavior.
+    """
 
     environment = os.environ if environ is None else environ
     defaults = _read_json(defaults_path or project_root / "config" / "defaults.json")
@@ -129,17 +135,19 @@ def load_config(
     selected_value = config_path or environment.get("VYOS_OVA_CONFIG_FILE")
     if selected_value:
         selected_path = _resolve_config_path(selected_value, project_root)
-    else:
+    elif include_default_local:
         selected_path = project_root / "config" / "local.json"
+    else:
+        selected_path = None
 
     merged = defaults
-    if selected_path.exists():
+    if selected_path is not None and selected_path.exists():
         local = _read_json(selected_path)
         schema = local.get("schema")
         if schema not in {None, CONFIG_SCHEMA}:
             raise ConfigurationError(f"Unsupported schema in {selected_path}")
         merged = deep_merge(merged, local)
-    elif explicitly_selected:
+    elif selected_path is not None and explicitly_selected:
         raise ConfigurationError(f"Selected local configuration does not exist: {selected_path}")
 
     for variable, path, converter in ENV_OVERRIDES:
