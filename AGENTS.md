@@ -57,7 +57,7 @@ Run before committing:
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m compileall -q scripts tests files/parse-config.py
+python3 -m compileall -q scripts tests files/parse-config.py files/resolve_interface.py
 bash -n build.sh upload.sh docker/run-build.sh files/vapp-init.sh files/vyos-postconfig-bootup.script
 ```
 

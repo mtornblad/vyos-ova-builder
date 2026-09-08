@@ -25,10 +25,10 @@ class SecurityContractTests(unittest.TestCase):
             "mgmt_ip",
             "mgmt_mask",
             "mgmt_gw",
-            "enable_rest",
             "config_blob",
         ):
             self.assertNotIn(legacy_name, script)
+        self.assertNotRegex(script, r"get_ovf_property (?:ssh|rest)\)")
 
     def test_management_services_share_listen_address_behavior(self) -> None:
         script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
@@ -36,6 +36,20 @@ class SecurityContractTests(unittest.TestCase):
         self.assertIn("set service https api rest", script)
         self.assertNotIn("set service ssh listen-address", script)
         self.assertNotIn("set service https listen-address", script)
+
+    def test_network_interfaces_are_resolved_before_configuration(self) -> None:
+        script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
+        self.assertIn('get_ovf_property management_network', script)
+        self.assertIn('get_ovf_property trunk_network', script)
+        self.assertIn('readonly DEFAULT_MANAGEMENT_INTERFACE="eth0"', script)
+        self.assertNotIn('readonly BASE_INTERFACE=', script)
+        self.assertIn('"$INTERFACE_RESOLVER" "$network_name"', script)
+        self.assertIn('decoded_argument="$MANAGEMENT_INTERFACE"', script)
+        self.assertIn('decoded_argument="$TRUNK_INTERFACE"', script)
+        self.assertLess(
+            script.index('resolve_network_interface management_network'),
+            script.index('apply_extra_config "$CONFIG_BASE64_VALUE"'),
+        )
 
     def test_first_boot_script_does_not_log_supplemental_config_or_rest_key(self) -> None:
         script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
@@ -111,16 +125,22 @@ class SecurityContractTests(unittest.TestCase):
                 "domain",
                 "ntp",
                 "vlan",
-                "ssh",
+                "enable_ssh",
                 "ssh_authorized_key",
-                "rest",
+                "enable_rest",
                 "rest_api_key",
+                "management_network",
+                "trunk_network",
                 "config_base64",
             },
         )
         secret_properties = [item for item in template["properties"] if item.get("password")]
-        ssh_property = next(item for item in template["properties"] if item["key"] == "ssh")
-        rest_property = next(item for item in template["properties"] if item["key"] == "rest")
+        ssh_property = next(
+            item for item in template["properties"] if item["key"] == "enable_ssh"
+        )
+        rest_property = next(
+            item for item in template["properties"] if item["key"] == "enable_rest"
+        )
         self.assertTrue(secret_properties)
         self.assertTrue(all(item.get("value", "") == "" for item in secret_properties))
         self.assertEqual(ssh_property["value"], "false")

@@ -167,11 +167,13 @@ Password properties have deliberately empty OVA defaults.
 | `guestinfo.dns` | Comma- or space-separated DNS servers | empty |
 | `guestinfo.domain` | DNS domain | empty |
 | `guestinfo.ntp` | Comma- or space-separated NTP servers | empty |
-| `guestinfo.vlan` | Optional VLAN ID on `eth0` | empty |
-| `guestinfo.ssh` | Enable SSH | `false` |
+| `guestinfo.vlan` | Optional VLAN ID on the resolved management interface | empty |
+| `guestinfo.enable_ssh` | Enable SSH | `false` |
 | `guestinfo.ssh_authorized_key` | OpenSSH public key for the `vyos` user | empty |
-| `guestinfo.rest` | Enable the REST API over HTTPS | `false` |
+| `guestinfo.enable_rest` | Enable the REST API over HTTPS | `false` |
 | `guestinfo.rest_api_key` | Full-access REST API key | empty, masked |
+| `guestinfo.management_network` | OVF network used to discover the management interface by MAC; empty falls back to `eth0` | empty |
+| `guestinfo.trunk_network` | OVF network used to discover the supplemental-configuration trunk interface by MAC | empty |
 | `guestinfo.config_base64` | Base64-encoded supplemental `set`/`delete` commands | empty |
 
 SSH and REST both retain VyOS's default listen-address behavior. To restrict
@@ -185,6 +187,13 @@ the stable properties above take precedence when both configure the same path.
 The worker then performs one atomic `commit` and `save`. Base64 is transport
 encoding, not encryption; place secrets in dedicated masked properties instead
 of the supplemental configuration whenever possible.
+
+When the two network properties are provided, the worker reads the OVF
+`EthernetAdapterSection` and maps each network's MAC address to the actual Linux
+interface. Supplemental commands may use the standalone tokens
+`__MANAGEMENT_INTERFACE__` and `__TRUNK_INTERFACE__`; they are replaced with
+the resolved names after parsing and are never evaluated as shell code. This
+avoids relying on VMware NIC enumeration order.
 
 ### First-boot execution
 

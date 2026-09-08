@@ -46,6 +46,11 @@ class BuildTests(unittest.TestCase):
                 / "data/live-build-config/includes.chroot/usr/local/libexec/"
                 "vyos-ova-parse-config"
             )
+            interface_resolver = (
+                checkout
+                / "data/live-build-config/includes.chroot/usr/local/libexec/"
+                "vyos-ova-resolve-interface"
+            )
             postconfig_script = (
                 checkout
                 / "data/live-build-config/includes.chroot/opt/vyatta/etc/config/scripts/"
@@ -59,6 +64,8 @@ class BuildTests(unittest.TestCase):
             self.assertTrue(init_script.stat().st_mode & 0o100)
             self.assertTrue(config_parser.is_file())
             self.assertTrue(config_parser.stat().st_mode & 0o100)
+            self.assertTrue(interface_resolver.is_file())
+            self.assertTrue(interface_resolver.stat().st_mode & 0o100)
             self.assertTrue(postconfig_script.is_file())
             self.assertTrue(postconfig_script.stat().st_mode & 0o100)
             self.assertFalse(legacy_service.exists())

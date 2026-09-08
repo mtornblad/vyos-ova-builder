@@ -7,14 +7,19 @@ export VYATTA_PAGER=cat
 readonly SCRIPT_PATH="/usr/local/sbin/vyos-vapp-init"
 readonly SCRIPT_TEMPLATE="/opt/vyatta/etc/functions/script-template"
 readonly CONFIG_PARSER="/usr/local/libexec/vyos-ova-parse-config"
+readonly INTERFACE_RESOLVER="/usr/local/libexec/vyos-ova-resolve-interface"
 readonly MARKER_DIR="/opt/vyos-ova-builder"
 readonly MARKER_FILE="${MARKER_DIR}/vapp-configured"
 readonly CONFIG_ARCHIVE_DIR="/opt/vyatta/etc/config/archive"
 readonly COMMIT_LOG_FILE="${CONFIG_ARCHIVE_DIR}/commits"
-readonly BASE_INTERFACE="eth0"
+readonly DEFAULT_MANAGEMENT_INTERFACE="eth0"
+readonly MANAGEMENT_INTERFACE_TOKEN="__MANAGEMENT_INTERFACE__"
+readonly TRUNK_INTERFACE_TOKEN="__TRUNK_INTERFACE__"
 readonly REST_API_ID="automation"
 
 PARSED_CONFIG_FILE=""
+MANAGEMENT_INTERFACE="$DEFAULT_MANAGEMENT_INTERFACE"
+TRUNK_INTERFACE=""
 
 # VyOS configuration scripts must run as root with vyattacfg as their primary
 # group. This also makes direct execution from the postconfig hook safe.
@@ -140,6 +145,35 @@ get_ovf_property() {
     xml_decode "$value"
 }
 
+resolve_network_interface() {
+    local property_name="$1"
+    local network_name="$2"
+    local fallback_interface="$3"
+    local resolved_interface
+
+    if [[ -z "$network_name" ]]; then
+        printf '%s' "$fallback_interface"
+        return 0
+    fi
+    if [[ ! -x "$INTERFACE_RESOLVER" ]]; then
+        printf 'ERROR: VMware network interface resolver is missing: %s\n' \
+            "$INTERFACE_RESOLVER" >&2
+        return 1
+    fi
+    if ! resolved_interface="$(
+        printf '%s' "$OVF_ENV" | "$INTERFACE_RESOLVER" "$network_name"
+    )"; then
+        return 1
+    fi
+    if [[ ! "$resolved_interface" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+        printf 'ERROR: guestinfo.%s resolved to an unsafe interface name\n' \
+            "$property_name" >&2
+        return 1
+    fi
+
+    printf '%s' "$resolved_interface"
+}
+
 is_true() {
     case "${1,,}" in
         1|true|yes|on) return 0 ;;
@@ -209,6 +243,21 @@ apply_extra_config() {
                 )"; then
                 fail "Supplemental configuration parser returned invalid data"
             fi
+
+            case "$decoded_argument" in
+                "$MANAGEMENT_INTERFACE_TOKEN")
+                    decoded_argument="$MANAGEMENT_INTERFACE"
+                    ;;
+                "$TRUNK_INTERFACE_TOKEN")
+                    if [[ -z "$TRUNK_INTERFACE" ]]; then
+                        fail "Supplemental configuration uses ${TRUNK_INTERFACE_TOKEN}, but guestinfo.trunk_network is empty"
+                    fi
+                    decoded_argument="$TRUNK_INTERFACE"
+                    ;;
+                *"$MANAGEMENT_INTERFACE_TOKEN"*|*"$TRUNK_INTERFACE_TOKEN"*)
+                    fail "Supplemental interface placeholders must be standalone arguments"
+                    ;;
+            esac
             config_arguments+=("$decoded_argument")
         done
 
@@ -281,14 +330,39 @@ DNS_VALUE="$(get_ovf_property dns)"
 DOMAIN_VALUE="$(get_ovf_property domain)"
 NTP_VALUE="$(get_ovf_property ntp)"
 VLAN_VALUE="$(get_ovf_property vlan)"
-SSH_VALUE="$(get_ovf_property ssh)"
+ENABLE_SSH_VALUE="$(get_ovf_property enable_ssh)"
 SSH_AUTHORIZED_KEY_VALUE="$(get_ovf_property ssh_authorized_key)"
-REST_VALUE="$(get_ovf_property rest)"
+ENABLE_REST_VALUE="$(get_ovf_property enable_rest)"
 REST_API_KEY_VALUE="$(get_ovf_property rest_api_key)"
+MANAGEMENT_NETWORK_VALUE="$(get_ovf_property management_network)"
+TRUNK_NETWORK_VALUE="$(get_ovf_property trunk_network)"
 CONFIG_BASE64_VALUE="$(get_ovf_property config_base64)"
 
 HOSTNAME_VALUE="${HOSTNAME_VALUE:-vyos}"
 NETMASK_VALUE="${NETMASK_VALUE:-24}"
+
+if ! MANAGEMENT_INTERFACE="$(
+    resolve_network_interface management_network \
+        "$MANAGEMENT_NETWORK_VALUE" "$DEFAULT_MANAGEMENT_INTERFACE"
+)"; then
+    fail "guestinfo.management_network could not be mapped to a Linux interface"
+fi
+if ! TRUNK_INTERFACE="$(
+    resolve_network_interface trunk_network "$TRUNK_NETWORK_VALUE" ""
+)"; then
+    fail "guestinfo.trunk_network could not be mapped to a Linux interface"
+fi
+if [[ -n "$TRUNK_INTERFACE" && "$TRUNK_INTERFACE" == "$MANAGEMENT_INTERFACE" ]]; then
+    fail "Management and trunk networks resolve to the same Linux interface"
+fi
+if [[ -n "$MANAGEMENT_NETWORK_VALUE" ]]; then
+    log "Mapped guestinfo.management_network to ${MANAGEMENT_INTERFACE}."
+else
+    log "Using default management interface ${MANAGEMENT_INTERFACE}."
+fi
+if [[ -n "$TRUNK_NETWORK_VALUE" ]]; then
+    log "Mapped guestinfo.trunk_network to ${TRUNK_INTERFACE}."
+fi
 
 if [[ -n "$VLAN_VALUE" ]]; then
     if [[ ! "$VLAN_VALUE" =~ ^[0-9]+$ ]] || (( 10#$VLAN_VALUE < 1 || 10#$VLAN_VALUE > 4094 )); then
@@ -312,13 +386,13 @@ set system host-name "$HOSTNAME_VALUE" \
     || fail "VyOS rejected guestinfo.hostname '${HOSTNAME_VALUE}'"
 log "Hostname configuration accepted."
 
-INTERFACE_PATH=(interfaces ethernet "$BASE_INTERFACE")
+INTERFACE_PATH=(interfaces ethernet "$MANAGEMENT_INTERFACE")
 if [[ -n "$VLAN_VALUE" ]]; then
-    log "Configuring management on ${BASE_INTERFACE}.${VLAN_VALUE}."
-    delete interfaces ethernet "$BASE_INTERFACE" address || true
+    log "Configuring management on ${MANAGEMENT_INTERFACE}.${VLAN_VALUE}."
+    delete interfaces ethernet "$MANAGEMENT_INTERFACE" address || true
     INTERFACE_PATH+=(vif "$VLAN_VALUE")
 else
-    log "Configuring management on ${BASE_INTERFACE}."
+    log "Configuring management on ${MANAGEMENT_INTERFACE}."
 fi
 
 delete "${INTERFACE_PATH[@]}" address || true
@@ -366,8 +440,8 @@ fi
 
 apply_ssh_authorized_key "$SSH_AUTHORIZED_KEY_VALUE"
 
-if is_true "$SSH_VALUE"; then
-    set service ssh port 22 || fail "VyOS rejected guestinfo.ssh"
+if is_true "$ENABLE_SSH_VALUE"; then
+    set service ssh port 22 || fail "VyOS rejected guestinfo.enable_ssh"
 else
     delete service ssh || true
 fi
@@ -375,15 +449,15 @@ fi
 # Like SSH, REST uses VyOS's default listen-address behavior. Deployments that
 # need interface-specific exposure can constrain service ssh/service https in
 # guestinfo.config_base64.
-if is_true "$REST_VALUE"; then
+if is_true "$ENABLE_REST_VALUE"; then
     if [[ -z "$REST_API_KEY_VALUE" ]]; then
-        fail "guestinfo.rest_api_key is required when guestinfo.rest is enabled"
+        fail "guestinfo.rest_api_key is required when guestinfo.enable_rest is enabled"
     fi
     log "Enabling the VyOS REST API."
     set service https api keys id "$REST_API_ID" key "$REST_API_KEY_VALUE" \
         || fail "VyOS rejected guestinfo.rest_api_key"
     set service https api rest \
-        || fail "VyOS rejected guestinfo.rest"
+        || fail "VyOS rejected guestinfo.enable_rest"
 else
     delete service https api rest || true
     delete service https api keys id "$REST_API_ID" || true

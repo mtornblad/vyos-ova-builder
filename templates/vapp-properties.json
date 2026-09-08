@@ -65,11 +65,11 @@
       "key": "vlan",
       "type": "string",
       "label": "Management VLAN",
-      "description": "Optional VLAN ID from 1 through 4094 on eth0.",
+      "description": "Optional VLAN ID from 1 through 4094 on the resolved management interface.",
       "value": ""
     },
     {
-      "key": "ssh",
+      "key": "enable_ssh",
       "type": "boolean",
       "label": "Enable SSH",
       "description": "Enable the VyOS SSH service.",
@@ -83,7 +83,7 @@
       "value": ""
     },
     {
-      "key": "rest",
+      "key": "enable_rest",
       "type": "boolean",
       "label": "Enable REST API",
       "description": "Enable the VyOS REST API over HTTPS.",
@@ -96,6 +96,20 @@
       "description": "Full-access API key used when the REST API is enabled.",
       "value": "",
       "password": true
+    },
+    {
+      "key": "management_network",
+      "type": "string",
+      "label": "Management network",
+      "description": "OVF network name used to discover the management interface by MAC address. Empty retains the eth0 fallback.",
+      "value": ""
+    },
+    {
+      "key": "trunk_network",
+      "type": "string",
+      "label": "Trunk network",
+      "description": "OVF network name used to discover the supplemental configuration trunk interface by MAC address.",
+      "value": ""
     },
     {
       "key": "config_base64",

@@ -284,6 +284,9 @@ def customize_source(checkout: Path, config: Mapping[str, Any]) -> None:
     parser_target = (
         include_root / "usr" / "local" / "libexec" / "vyos-ova-parse-config"
     )
+    resolver_target = (
+        include_root / "usr" / "local" / "libexec" / "vyos-ova-resolve-interface"
+    )
     postconfig_target = (
         include_root
         / "opt"
@@ -301,12 +304,14 @@ def customize_source(checkout: Path, config: Mapping[str, Any]) -> None:
     shutil.copy2(flavor_source, flavor_target)
     shutil.copy2(PROJECT_ROOT / "files" / "vapp-init.sh", script_target)
     shutil.copy2(PROJECT_ROOT / "files" / "parse-config.py", parser_target)
+    shutil.copy2(PROJECT_ROOT / "files" / "resolve_interface.py", resolver_target)
     shutil.copy2(
         PROJECT_ROOT / "files" / "vyos-postconfig-bootup.script",
         postconfig_target,
     )
     script_target.chmod(0o755)
     parser_target.chmod(0o755)
+    resolver_target.chmod(0o755)
     postconfig_target.chmod(0o755)
 
 
