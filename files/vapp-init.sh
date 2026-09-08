@@ -9,6 +9,8 @@ readonly SCRIPT_TEMPLATE="/opt/vyatta/etc/functions/script-template"
 readonly CONFIG_PARSER="/usr/local/libexec/vyos-ova-parse-config"
 readonly MARKER_DIR="/opt/vyos-ova-builder"
 readonly MARKER_FILE="${MARKER_DIR}/vapp-configured"
+readonly CONFIG_ARCHIVE_DIR="/opt/vyatta/etc/config/archive"
+readonly COMMIT_LOG_FILE="${CONFIG_ARCHIVE_DIR}/commits"
 readonly BASE_INTERFACE="eth0"
 readonly REST_API_ID="automation"
 
@@ -37,6 +39,25 @@ log() {
 fail() {
     log "ERROR: $*"
     builtin exit 1
+}
+
+normalize_config_archive_permissions() {
+    # A commit executed as root can leave the revision log owned by root:root.
+    # Keep the stock VyOS group contract so later interactive commits made by
+    # members of vyattacfg can update the log.
+    mkdir -p -- "$CONFIG_ARCHIVE_DIR" \
+        || fail "Could not create the VyOS configuration archive directory"
+    chown root:vyattacfg "$CONFIG_ARCHIVE_DIR" \
+        || fail "Could not set ownership on the VyOS configuration archive directory"
+    chmod 2775 "$CONFIG_ARCHIVE_DIR" \
+        || fail "Could not set permissions on the VyOS configuration archive directory"
+
+    if [[ -e "$COMMIT_LOG_FILE" ]]; then
+        chown root:vyattacfg "$COMMIT_LOG_FILE" \
+            || fail "Could not set ownership on the VyOS commit log"
+        chmod 0664 "$COMMIT_LOG_FILE" \
+            || fail "Could not set permissions on the VyOS commit log"
+    fi
 }
 
 log "Starting VyOS vApp initialization."
@@ -368,6 +389,10 @@ else
     delete service https api keys id "$REST_API_ID" || true
 fi
 
+# Set the archive directory's set-group-ID bit before the root-owned bootstrap
+# commit creates or rewrites its revision log.
+normalize_config_archive_permissions
+
 log "Committing first-boot configuration."
 commit || fail "VyOS configuration could not be committed"
 log "VyOS configuration committed."
@@ -375,6 +400,10 @@ log "VyOS configuration committed."
 log "Saving first-boot configuration."
 save || fail "VyOS configuration could not be saved"
 log "VyOS configuration saved."
+
+# Normalize an existing log too, including images where an earlier boot or
+# VyOS hook created it with root as both owner and group.
+normalize_config_archive_permissions
 
 install -d -m 0700 "$MARKER_DIR"
 touch "$MARKER_FILE"

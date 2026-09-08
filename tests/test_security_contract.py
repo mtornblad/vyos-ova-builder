@@ -57,6 +57,26 @@ class SecurityContractTests(unittest.TestCase):
         self.assertIn('exec /usr/bin/sg vyattacfg -c "/bin/vbash ${SCRIPT_PATH}"', script)
         self.assertIn('SET_COMMAND_TYPE="$(type -t set || true)"', script)
 
+    def test_first_boot_preserves_interactive_commit_permissions(self) -> None:
+        script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
+        invocation = "\nnormalize_config_archive_permissions\n"
+        self.assertIn(
+            'readonly CONFIG_ARCHIVE_DIR="/opt/vyatta/etc/config/archive"',
+            script,
+        )
+        self.assertIn('chown root:vyattacfg "$CONFIG_ARCHIVE_DIR"', script)
+        self.assertIn('chmod 2775 "$CONFIG_ARCHIVE_DIR"', script)
+        self.assertIn('chown root:vyattacfg "$COMMIT_LOG_FILE"', script)
+        self.assertIn('chmod 0664 "$COMMIT_LOG_FILE"', script)
+        self.assertEqual(script.count(invocation), 2)
+
+        first_repair = script.index(invocation)
+        second_repair = script.index(invocation, first_repair + len(invocation))
+        self.assertLess(first_repair, script.index('commit || fail'))
+        self.assertGreater(second_repair, script.index('save || fail'))
+        self.assertNotIn("chown -R", script)
+        self.assertNotIn("chmod -R", script)
+
     def test_first_boot_script_closes_the_configuration_session(self) -> None:
         script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
         self.assertIn("trap cleanup EXIT", script)
