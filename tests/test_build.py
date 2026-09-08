@@ -40,15 +40,20 @@ class BuildTests(unittest.TestCase):
                 checkout
                 / "data/live-build-config/includes.chroot/usr/local/sbin/vyos-vapp-init"
             )
-            service_link = (
+            postconfig_script = (
                 checkout
-                / "data/live-build-config/includes.chroot/etc/systemd/system/"
-                "multi-user.target.wants/vapp-init.service"
+                / "data/live-build-config/includes.chroot/opt/vyatta/etc/config/scripts/"
+                "vyos-postconfig-bootup.script"
+            )
+            legacy_service = (
+                checkout
+                / "data/live-build-config/includes.chroot/etc/systemd/system/vapp-init.service"
             )
             self.assertTrue(init_script.is_file())
             self.assertTrue(init_script.stat().st_mode & 0o100)
-            self.assertTrue(service_link.is_symlink())
-            self.assertEqual(service_link.readlink(), Path("../vapp-init.service"))
+            self.assertTrue(postconfig_script.is_file())
+            self.assertTrue(postconfig_script.stat().st_mode & 0o100)
+            self.assertFalse(legacy_service.exists())
 
     def test_owned_directory_guard_rejects_root_itself(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_name:

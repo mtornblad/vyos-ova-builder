@@ -9,7 +9,7 @@ show-config:
 test:
 	python3 -m unittest discover -s tests -v
 	python3 -m compileall -q scripts tests
-	bash -n build.sh upload.sh files/vapp-init.sh
+	bash -n build.sh upload.sh files/vapp-init.sh files/vyos-postconfig-bootup.script
 
 dependencies:
 	python3 scripts/download_dependencies.py

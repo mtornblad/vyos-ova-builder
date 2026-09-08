@@ -14,7 +14,13 @@ class SecurityContractTests(unittest.TestCase):
         script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
         self.assertNotIn("eval ", script)
         self.assertNotIn("DEFAULT_API", script)
-        self.assertIn("set -o errexit", script)
+        self.assertNotIn("set -o errexit", script)
+        self.assertIn("builtin set -o nounset", script)
+        self.assertIn("builtin set -o pipefail", script)
+        self.assertLess(
+            script.index('source "$SCRIPT_TEMPLATE"'),
+            script.index("builtin set -o nounset"),
+        )
         for legacy_name in (
             "mgmt_ip",
             "mgmt_mask",
@@ -25,6 +31,17 @@ class SecurityContractTests(unittest.TestCase):
         ):
             self.assertNotIn(legacy_name, script)
 
+    def test_first_boot_script_does_not_wait_for_its_parent_service(self) -> None:
+        script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
+        self.assertNotIn("systemctl", script)
+        self.assertNotRegex(script, r"(?m)^\s*sleep\s")
+        self.assertNotIn("while cli-shell-api inSession", script)
+
+    def test_first_boot_script_selects_the_vyattacfg_primary_group(self) -> None:
+        script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
+        self.assertIn('exec /usr/bin/sg vyattacfg -c "/bin/vbash ${SCRIPT_PATH}"', script)
+        self.assertIn('SET_COMMAND_TYPE="$(type -t set || true)"', script)
+
     def test_first_boot_script_closes_the_configuration_session(self) -> None:
         script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
         self.assertIn("trap cleanup EXIT", script)
@@ -33,10 +50,14 @@ class SecurityContractTests(unittest.TestCase):
         self.assertIn("builtin exit 0", script)
         self.assertIsNone(re.search(r"(?m)^\s*exit\s+[01]\s*$", script))
 
-    def test_first_boot_service_uses_vyattacfg_as_primary_group(self) -> None:
-        service = (PROJECT_ROOT / "files" / "vapp-init.service").read_text(encoding="utf-8")
-        self.assertRegex(service, r"(?m)^User=root$")
-        self.assertRegex(service, r"(?m)^Group=vyattacfg$")
+    def test_postconfig_hook_contains_failure_and_allows_vyos_boot(self) -> None:
+        hook = (PROJECT_ROOT / "files" / "vyos-postconfig-bootup.script").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("if ! /usr/local/sbin/vyos-vapp-init; then", hook)
+        self.assertIn("retried on the next boot", hook)
+        self.assertRegex(hook, r"(?m)^builtin exit 0$")
+        self.assertFalse((PROJECT_ROOT / "files" / "vapp-init.service").exists())
 
     def test_every_password_property_has_an_empty_default(self) -> None:
         template = json.loads(

@@ -162,21 +162,27 @@ def customize_source(checkout: Path, config: Mapping[str, Any]) -> None:
     flavor_target = checkout / "data" / "build-flavors" / f"{flavor_name}.toml"
     include_root = checkout / "data" / "live-build-config" / "includes.chroot"
     script_target = include_root / "usr" / "local" / "sbin" / "vyos-vapp-init"
-    service_target = include_root / "etc" / "systemd" / "system" / "vapp-init.service"
-    wants_target = include_root / "etc" / "systemd" / "system" / "multi-user.target.wants"
+    postconfig_target = (
+        include_root
+        / "opt"
+        / "vyatta"
+        / "etc"
+        / "config"
+        / "scripts"
+        / "vyos-postconfig-bootup.script"
+    )
 
     flavor_target.parent.mkdir(parents=True, exist_ok=True)
     script_target.parent.mkdir(parents=True, exist_ok=True)
-    service_target.parent.mkdir(parents=True, exist_ok=True)
-    wants_target.mkdir(parents=True, exist_ok=True)
+    postconfig_target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(flavor_source, flavor_target)
     shutil.copy2(PROJECT_ROOT / "files" / "vapp-init.sh", script_target)
-    shutil.copy2(PROJECT_ROOT / "files" / "vapp-init.service", service_target)
+    shutil.copy2(
+        PROJECT_ROOT / "files" / "vyos-postconfig-bootup.script",
+        postconfig_target,
+    )
     script_target.chmod(0o755)
-
-    service_link = wants_target / "vapp-init.service"
-    service_link.unlink(missing_ok=True)
-    service_link.symlink_to("../vapp-init.service")
+    postconfig_target.chmod(0o755)
 
 
 def build_container_image(config: Mapping[str, Any], syft_package: Path) -> None:

@@ -1,0 +1,12 @@
+#!/bin/vbash
+
+# VyOS runs this hook after the saved configuration has been applied. The
+# worker owns logging, validation, session handling, commit, save, and its
+# completion marker. A failure must not make vyos-router.service fail; without
+# a marker the worker will try again on the next boot.
+if ! /usr/local/sbin/vyos-vapp-init; then
+    logger -t vyos-vapp-init \
+        "ERROR: vApp initialization failed; it will be retried on the next boot."
+fi
+
+builtin exit 0

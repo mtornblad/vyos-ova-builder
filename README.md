@@ -162,6 +162,29 @@ Password properties have deliberately empty OVA defaults.
 | `guestinfo.vlan` | Optional VLAN ID on `eth0` | empty |
 | `guestinfo.ssh` | Enable SSH | `false` |
 
+### First-boot execution
+
+The image contains `/usr/local/sbin/vyos-vapp-init` and seeds
+`/config/scripts/vyos-postconfig-bootup.script` through VyOS's default
+configuration skeleton. VyOS invokes that hook after the saved configuration
+has been applied. The hook calls the worker directly; no additional systemd
+unit is installed and the worker does not wait for `vyos-router.service` or a
+second configuration session.
+
+On success, the worker commits and saves the generated configuration and then
+creates `/opt/vyos-ova-builder/vapp-configured`. Later boots are no-ops while
+that marker exists. On failure, the hook logs the error without failing the
+VyOS boot, leaves the marker absent, and retries on the next boot. Logs use the
+`vyos-vapp-init` syslog tag.
+
+Useful guest-side checks are:
+
+```bash
+vmtoolsd --cmd 'info-get guestinfo.ovfEnv'
+sudo grep -F 'vyos-vapp-init' /var/log/messages
+sudo test -e /opt/vyos-ova-builder/vapp-configured
+```
+
 ## Security
 
 - No vCenter or VyOS password is committed or built into the OVA.

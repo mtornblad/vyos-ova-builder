@@ -30,13 +30,17 @@ from VyOS sources and adds first-boot configuration through vApp properties.
 - Pin downloaded dependencies by version and SHA-256 in
   `bom/vyos-ova-builder-bom.json`.
 - Do not commit downloaded packages, ISO/OVA/OVF/VMDK files, logs, or caches.
-- Quote shell paths and use `set -Eeuo pipefail` in Bash entry points.
+- Quote shell paths and use `set -Eeuo pipefail` in ordinary Bash entry points.
+- In VyOS configuration scripts, source `script-template` before shell options,
+  use `builtin set` for shell options, and check VyOS commands explicitly.
 - Do not log secrets or decoded vApp configuration commands.
 
 ## vApp initialization
 
 - All VyOS changes must run through a single configuration session followed by
   `commit` and `save`.
+- Start first-boot configuration from `vyos-postconfig-bootup.script`; do not
+  wait for `vyos-router.service` from inside that hook.
 - A failed initialization must not create the completion marker.
 - Published vApp properties use the shared `guestinfo.*` naming convention.
 - Do not add legacy property aliases unless a migration requirement is agreed.
@@ -50,7 +54,7 @@ Run before committing:
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m compileall -q scripts tests
-bash -n build.sh upload.sh files/vapp-init.sh
+bash -n build.sh upload.sh files/vapp-init.sh files/vyos-postconfig-bootup.script
 ```
 
 An end-to-end image build additionally requires Docker, `ovftool`, network
