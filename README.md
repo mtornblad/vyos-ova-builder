@@ -131,6 +131,14 @@ disposable checkout, builds the VMDK, then creates the OVA and a redacted build
 manifest. `upload.sh` imports that OVA into the configured vCenter Content
 Library.
 
+The privileged VyOS build runs through a container wrapper that records the
+host UID/GID and restores ownership of the mounted disposable checkout before
+the container exits, including when the build command fails. The wrapper
+removes an ownership marker before starting and recreates it only after a
+successful cleanup. If an older or interrupted build left foreign-owned files,
+the next build repairs that checkout with container root before replacing it.
+No host-side `sudo` cleanup should be needed during normal operation.
+
 Downloaded and generated data is kept outside Git:
 
 | Directory | Content |

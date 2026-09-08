@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +55,147 @@ class BuildTests(unittest.TestCase):
             self.assertTrue(postconfig_script.is_file())
             self.assertTrue(postconfig_script.stat().st_mode & 0o100)
             self.assertFalse(legacy_service.exists())
+
+    def test_container_context_includes_ownership_cleanup_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_name:
+            temporary = Path(temporary_name)
+            syft_package = temporary / "syft.deb"
+            syft_package.write_bytes(b"test package")
+            config = copy.deepcopy(load_config(environ={}, include_default_local=False))
+            config["paths"]["artifacts"] = str(temporary / "artifacts")
+
+            with mock.patch.object(build_module, "run"):
+                build_module.build_container_image(config, syft_package)
+
+            context = temporary / "artifacts" / "work" / "docker-context"
+            wrapper = context / "run-build.sh"
+            dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
+            self.assertTrue(wrapper.is_file())
+            self.assertTrue(wrapper.stat().st_mode & 0o100)
+            self.assertIn("COPY run-build.sh /usr/local/bin/vyos-ova-run-build", dockerfile)
+
+    def test_privileged_build_restores_host_uid_and_gid(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_name:
+            checkout = Path(temporary_name) / "checkout"
+            (checkout / "build").mkdir(parents=True)
+            expected_vmdk = checkout / "build" / "vyos.vmdk"
+            expected_vmdk.write_bytes(b"vmdk")
+            config = copy.deepcopy(load_config(environ={}, include_default_local=False))
+
+            with (
+                mock.patch.object(build_module, "run") as run_mock,
+                mock.patch.object(build_module.os, "getuid", return_value=1234),
+                mock.patch.object(build_module.os, "getgid", return_value=5678),
+            ):
+                result = build_module.build_vmdk(checkout, config)
+
+            command = run_mock.call_args.args[0]
+            image_index = command.index(str(config["build"]["docker_image"]))
+            self.assertEqual(
+                command[image_index + 1 : image_index + 5],
+                [
+                    "/usr/local/bin/vyos-ova-run-build",
+                    "1234",
+                    "5678",
+                    "./build-vyos-image",
+                ],
+            )
+            self.assertEqual(result, expected_vmdk)
+
+    def test_permission_repair_is_confined_to_builder_work_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_name:
+            work_root = Path(temporary_name) / "work"
+            checkout = work_root / "vyos-build"
+            checkout.mkdir(parents=True)
+
+            with mock.patch.object(build_module, "run") as run_mock:
+                build_module.repair_directory_ownership(
+                    checkout,
+                    work_root,
+                    "builder:test",
+                    uid=1234,
+                    gid=5678,
+                )
+
+            command = run_mock.call_args.args[0]
+            self.assertEqual(command[:3], ["docker", "run", "--rm"])
+            self.assertIn(f"{checkout.resolve()}:/builder-work", command)
+            self.assertIn("builder:test", command)
+            self.assertIn("1234:5678", command)
+            self.assertEqual(
+                (checkout / build_module.OWNERSHIP_MARKER_NAME).read_text(
+                    encoding="utf-8"
+                ),
+                "1234:5678\n",
+            )
+
+            with self.assertRaisesRegex(build_module.BuildError, "outside"):
+                build_module.repair_directory_ownership(
+                    work_root,
+                    work_root,
+                    "builder:test",
+                    uid=1234,
+                    gid=5678,
+                )
+
+    def test_foreign_checkout_is_repaired_when_cleanup_marker_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_name:
+            work_root = Path(temporary_name) / "work"
+            checkout = work_root / "vyos-build"
+            checkout.mkdir(parents=True)
+
+            with (
+                mock.patch.object(build_module.os, "getuid", return_value=1234),
+                mock.patch.object(build_module.os, "getgid", return_value=5678),
+                mock.patch.object(
+                    build_module,
+                    "directory_has_foreign_owner",
+                    return_value=True,
+                ),
+                mock.patch.object(build_module, "repair_directory_ownership") as repair_mock,
+            ):
+                build_module.ensure_directory_ownership(
+                    checkout,
+                    work_root,
+                    "builder:test",
+                )
+
+            repair_mock.assert_called_once_with(
+                checkout.resolve(),
+                work_root,
+                "builder:test",
+                uid=1234,
+                gid=5678,
+            )
+
+    def test_valid_cleanup_marker_skips_recursive_ownership_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_name:
+            work_root = Path(temporary_name) / "work"
+            checkout = work_root / "vyos-build"
+            checkout.mkdir(parents=True)
+            (checkout / build_module.OWNERSHIP_MARKER_NAME).write_text(
+                "1234:5678\n", encoding="utf-8"
+            )
+
+            with (
+                mock.patch.object(build_module.os, "getuid", return_value=1234),
+                mock.patch.object(build_module.os, "getgid", return_value=5678),
+                mock.patch.object(build_module, "directory_has_foreign_owner") as scan_mock,
+            ):
+                build_module.ensure_directory_ownership(
+                    checkout,
+                    work_root,
+                    "builder:test",
+                )
+
+            scan_mock.assert_not_called()
+
+    def test_cleanup_wrapper_marks_only_successful_ownership_repair(self) -> None:
+        wrapper = (PROJECT_ROOT / "docker" / "run-build.sh").read_text(encoding="utf-8")
+        self.assertIn("trap cleanup EXIT", wrapper)
+        self.assertIn('find "$WORKSPACE" -xdev', wrapper)
+        self.assertIn('rm -f -- "$OWNERSHIP_MARKER"', wrapper)
+        self.assertIn('sudo -- "$@"', wrapper)
 
     def test_owned_directory_guard_rejects_root_itself(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_name:

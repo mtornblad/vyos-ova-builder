@@ -27,6 +27,8 @@ from VyOS sources and adds first-boot configuration through vApp properties.
 
 - Never modify or hard-reset a user-managed VyOS checkout.
 - Customize only the disposable checkout under `artifacts/work/`.
+- Privileged container builds must restore the disposable checkout to the host
+  UID/GID before exiting, including on build failure.
 - Pin downloaded dependencies by version and SHA-256 in
   `bom/vyos-ova-builder-bom.json`.
 - Do not commit downloaded packages, ISO/OVA/OVF/VMDK files, logs, or caches.
@@ -54,7 +56,7 @@ Run before committing:
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m compileall -q scripts tests
-bash -n build.sh upload.sh files/vapp-init.sh files/vyos-postconfig-bootup.script
+bash -n build.sh upload.sh docker/run-build.sh files/vapp-init.sh files/vyos-postconfig-bootup.script
 ```
 
 An end-to-end image build additionally requires Docker, `ovftool`, network

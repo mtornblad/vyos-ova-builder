@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,9 @@ from project_config import PROJECT_ROOT, artifact_paths, load_config, redacted, 
 
 class BuildError(RuntimeError):
     """Raised when source preparation or the VyOS build fails."""
+
+
+OWNERSHIP_MARKER_NAME = ".vyos-ova-builder-owner"
 
 
 def safe_location(location: str) -> str:
@@ -68,14 +72,124 @@ def require_command(name: str) -> str:
     return executable
 
 
-def reset_owned_directory(path: Path, owned_root: Path) -> None:
+def resolve_owned_child(path: Path, owned_root: Path) -> Path:
     resolved = path.resolve()
     resolved_root = owned_root.resolve()
     if resolved == resolved_root or resolved_root not in resolved.parents:
-        raise BuildError(f"Refusing to reset directory outside the builder work area: {resolved}")
+        raise BuildError(f"Refusing to modify directory outside the builder work area: {resolved}")
+    return resolved
+
+
+def reset_owned_directory(path: Path, owned_root: Path) -> None:
+    resolved = resolve_owned_child(path, owned_root)
     if resolved.exists():
         shutil.rmtree(resolved)
     resolved.mkdir(parents=True)
+
+
+def directory_has_foreign_owner(path: Path, *, uid: int, gid: int) -> bool:
+    """Return whether a tree contains entries not owned by the build user."""
+
+    try:
+        root_device = path.lstat().st_dev
+    except OSError:
+        return True
+    pending = [path]
+    while pending:
+        candidate = pending.pop()
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True
+        if metadata.st_dev != root_device:
+            continue
+        if metadata.st_uid != uid or metadata.st_gid != gid:
+            return True
+        if not stat.S_ISDIR(metadata.st_mode):
+            continue
+        try:
+            with os.scandir(candidate) as entries:
+                pending.extend(Path(entry.path) for entry in entries)
+        except OSError:
+            return True
+    return False
+
+
+def repair_directory_ownership(
+    path: Path,
+    owned_root: Path,
+    image: str,
+    *,
+    uid: int | None = None,
+    gid: int | None = None,
+) -> None:
+    """Use container root to return a disposable build tree to the host user."""
+
+    resolved = resolve_owned_child(path, owned_root)
+    host_uid = os.getuid() if uid is None else uid
+    host_gid = os.getgid() if gid is None else gid
+    print(f"Repairing container-created ownership below {resolved}", flush=True)
+    run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            "0:0",
+            "--entrypoint",
+            "/usr/bin/find",
+            "--volume",
+            f"{resolved}:/builder-work",
+            image,
+            "/builder-work",
+            "-xdev",
+            "(",
+            "!",
+            "-uid",
+            str(host_uid),
+            "-o",
+            "!",
+            "-gid",
+            str(host_gid),
+            ")",
+            "-exec",
+            "/usr/bin/chown",
+            "-h",
+            "--",
+            f"{host_uid}:{host_gid}",
+            "{}",
+            "+",
+        ]
+    )
+    marker = resolved / OWNERSHIP_MARKER_NAME
+    marker.unlink(missing_ok=True)
+    marker.write_text(f"{host_uid}:{host_gid}\n", encoding="utf-8")
+
+
+def ensure_directory_ownership(path: Path, owned_root: Path, image: str) -> None:
+    """Repair an old or interrupted container build before host-side cleanup."""
+
+    if not path.exists():
+        return
+    resolved = resolve_owned_child(path, owned_root)
+    host_uid = os.getuid()
+    host_gid = os.getgid()
+    marker = resolved / OWNERSHIP_MARKER_NAME
+    try:
+        if marker.read_text(encoding="utf-8").strip() == f"{host_uid}:{host_gid}":
+            return
+    except OSError:
+        pass
+    if directory_has_foreign_owner(resolved, uid=host_uid, gid=host_gid):
+        repair_directory_ownership(
+            resolved,
+            owned_root,
+            image,
+            uid=host_uid,
+            gid=host_gid,
+        )
 
 
 def source_location(config: Mapping[str, Any]) -> str:
@@ -126,6 +240,11 @@ def prepare_source(config: Mapping[str, Any]) -> tuple[Path, str]:
     reference = source_reference(config, location)
     paths["sources"].mkdir(parents=True, exist_ok=True)
     paths["work"].mkdir(parents=True, exist_ok=True)
+    ensure_directory_ownership(
+        checkout,
+        paths["work"],
+        str(config["build"]["docker_base_image"]),
+    )
 
     if mirror.exists():
         if not (mirror / "HEAD").is_file():
@@ -190,6 +309,7 @@ def build_container_image(config: Mapping[str, Any], syft_package: Path) -> None
     context = paths["work"] / "docker-context"
     reset_owned_directory(context, paths["work"])
     shutil.copy2(PROJECT_ROOT / "docker" / "Dockerfile", context / "Dockerfile")
+    shutil.copy2(PROJECT_ROOT / "docker" / "run-build.sh", context / "run-build.sh")
     shutil.copy2(syft_package, context / "syft.deb")
     run(
         [
@@ -207,7 +327,6 @@ def build_container_image(config: Mapping[str, Any], syft_package: Path) -> None
 def build_vmdk(checkout: Path, config: Mapping[str, Any]) -> Path:
     build = config["build"]
     command = [
-        "sudo",
         "./build-vyos-image",
         str(build["flavor"]),
         "--architecture",
@@ -231,6 +350,9 @@ def build_vmdk(checkout: Path, config: Mapping[str, Any]) -> Path:
             "--workdir",
             "/vyos",
             str(build["docker_image"]),
+            "/usr/local/bin/vyos-ova-run-build",
+            str(os.getuid()),
+            str(os.getgid()),
             *command,
         ]
     )
