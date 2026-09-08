@@ -281,6 +281,9 @@ def customize_source(checkout: Path, config: Mapping[str, Any]) -> None:
     flavor_target = checkout / "data" / "build-flavors" / f"{flavor_name}.toml"
     include_root = checkout / "data" / "live-build-config" / "includes.chroot"
     script_target = include_root / "usr" / "local" / "sbin" / "vyos-vapp-init"
+    parser_target = (
+        include_root / "usr" / "local" / "libexec" / "vyos-ova-parse-config"
+    )
     postconfig_target = (
         include_root
         / "opt"
@@ -293,14 +296,17 @@ def customize_source(checkout: Path, config: Mapping[str, Any]) -> None:
 
     flavor_target.parent.mkdir(parents=True, exist_ok=True)
     script_target.parent.mkdir(parents=True, exist_ok=True)
+    parser_target.parent.mkdir(parents=True, exist_ok=True)
     postconfig_target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(flavor_source, flavor_target)
     shutil.copy2(PROJECT_ROOT / "files" / "vapp-init.sh", script_target)
+    shutil.copy2(PROJECT_ROOT / "files" / "parse-config.py", parser_target)
     shutil.copy2(
         PROJECT_ROOT / "files" / "vyos-postconfig-bootup.script",
         postconfig_target,
     )
     script_target.chmod(0o755)
+    parser_target.chmod(0o755)
     postconfig_target.chmod(0o755)
 
 

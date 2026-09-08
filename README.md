@@ -169,6 +169,22 @@ Password properties have deliberately empty OVA defaults.
 | `guestinfo.ntp` | Comma- or space-separated NTP servers | empty |
 | `guestinfo.vlan` | Optional VLAN ID on `eth0` | empty |
 | `guestinfo.ssh` | Enable SSH | `false` |
+| `guestinfo.ssh_authorized_key` | OpenSSH public key for the `vyos` user | empty |
+| `guestinfo.rest` | Enable the REST API over HTTPS | `false` |
+| `guestinfo.rest_api_key` | Full-access REST API key | empty, masked |
+| `guestinfo.config_base64` | Base64-encoded supplemental `set`/`delete` commands | empty |
+
+SSH and REST both retain VyOS's default listen-address behavior. To restrict
+either service to selected addresses, provide the corresponding `service ssh`
+or `service https` commands in `guestinfo.config_base64`.
+
+Supplemental configuration is decoded as UTF-8 and parsed without shell
+evaluation. Blank lines and comments are allowed, but every command must begin
+with `set` or `delete`. It is applied before the dedicated vApp properties, so
+the stable properties above take precedence when both configure the same path.
+The worker then performs one atomic `commit` and `save`. Base64 is transport
+encoding, not encryption; place secrets in dedicated masked properties instead
+of the supplemental configuration whenever possible.
 
 ### First-boot execution
 
@@ -197,6 +213,7 @@ sudo test -e /opt/vyos-ova-builder/vapp-configured
 
 - No vCenter or VyOS password is committed or built into the OVA.
 - Secret configuration is redacted from diagnostics and manifests.
+- Decoded supplemental commands and REST API keys are never written to logs.
 - `config/local.json`, environment files, downloaded packages, and built images
   are excluded by `.gitignore`.
 - Treat an OVA instantiated with deployment secrets as sensitive even though

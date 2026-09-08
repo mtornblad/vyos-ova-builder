@@ -74,6 +74,35 @@
       "label": "Enable SSH",
       "description": "Enable the VyOS SSH service.",
       "value": "false"
+    },
+    {
+      "key": "ssh_authorized_key",
+      "type": "string",
+      "label": "SSH authorized key",
+      "description": "Optional OpenSSH public key for the vyos account.",
+      "value": ""
+    },
+    {
+      "key": "rest",
+      "type": "boolean",
+      "label": "Enable REST API",
+      "description": "Enable the VyOS REST API over HTTPS.",
+      "value": "false"
+    },
+    {
+      "key": "rest_api_key",
+      "type": "string",
+      "label": "REST API key",
+      "description": "Full-access API key used when the REST API is enabled.",
+      "value": "",
+      "password": true
+    },
+    {
+      "key": "config_base64",
+      "type": "string",
+      "label": "Supplemental configuration",
+      "description": "Base64-encoded UTF-8 VyOS set and delete commands applied at first boot.",
+      "value": ""
     }
   ]
 }

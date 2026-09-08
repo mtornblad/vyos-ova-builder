@@ -6,9 +6,13 @@ export VYATTA_PAGER=cat
 
 readonly SCRIPT_PATH="/usr/local/sbin/vyos-vapp-init"
 readonly SCRIPT_TEMPLATE="/opt/vyatta/etc/functions/script-template"
+readonly CONFIG_PARSER="/usr/local/libexec/vyos-ova-parse-config"
 readonly MARKER_DIR="/opt/vyos-ova-builder"
 readonly MARKER_FILE="${MARKER_DIR}/vapp-configured"
 readonly BASE_INTERFACE="eth0"
+readonly REST_API_ID="automation"
+
+PARSED_CONFIG_FILE=""
 
 # VyOS configuration scripts must run as root with vyattacfg as their primary
 # group. This also makes direct execution from the postconfig hook safe.
@@ -73,6 +77,10 @@ cleanup() {
 
     # Avoid recursively invoking this trap when cleanup has completed.
     trap - EXIT
+
+    if [[ -n "$PARSED_CONFIG_FILE" ]]; then
+        rm -f -- "$PARSED_CONFIG_FILE"
+    fi
 
     if cli-shell-api inSession; then
         if (( exit_status != 0 )); then
@@ -141,6 +149,102 @@ except (ipaddress.NetmaskValueError, ipaddress.AddressValueError):
     printf '%s' "$prefix"
 }
 
+apply_extra_config() {
+    local encoded_config="$1"
+    local encoded_argument
+    local decoded_argument
+    local -a encoded_arguments
+    local -a config_arguments
+    local command_count=0
+
+    if [[ -z "$encoded_config" ]]; then
+        return 0
+    fi
+    if [[ ! -x "$CONFIG_PARSER" ]]; then
+        fail "Supplemental configuration parser is missing: ${CONFIG_PARSER}"
+    fi
+
+    PARSED_CONFIG_FILE="$(mktemp /run/vyos-vapp-init.XXXXXX)" \
+        || fail "Could not create supplemental configuration workspace"
+    chmod 0600 "$PARSED_CONFIG_FILE" \
+        || fail "Could not protect supplemental configuration workspace"
+
+    if ! printf '%s' "$encoded_config" \
+        | base64 --decode 2>/dev/null \
+        | "$CONFIG_PARSER" >"$PARSED_CONFIG_FILE"; then
+        fail "guestinfo.config_base64 is not valid supplemental configuration"
+    fi
+
+    while IFS=$'\t' read -r -a encoded_arguments; do
+        if (( ${#encoded_arguments[@]} < 2 )); then
+            fail "Supplemental configuration parser returned an invalid command"
+        fi
+
+        config_arguments=()
+        for encoded_argument in "${encoded_arguments[@]}"; do
+            if [[ "$encoded_argument" != x* ]] \
+                || ! decoded_argument="$(
+                    printf '%s' "${encoded_argument#x}" | base64 --decode 2>/dev/null
+                )"; then
+                fail "Supplemental configuration parser returned invalid data"
+            fi
+            config_arguments+=("$decoded_argument")
+        done
+
+        case "${config_arguments[0]}" in
+            set)
+                set "${config_arguments[@]:1}" \
+                    || fail "VyOS rejected supplemental set command $((command_count + 1))"
+                ;;
+            delete)
+                delete "${config_arguments[@]:1}" \
+                    || fail "VyOS rejected supplemental delete command $((command_count + 1))"
+                ;;
+            *)
+                fail "Supplemental configuration parser returned a forbidden command"
+                ;;
+        esac
+        ((command_count += 1))
+    done <"$PARSED_CONFIG_FILE"
+
+    rm -f -- "$PARSED_CONFIG_FILE"
+    PARSED_CONFIG_FILE=""
+    log "Applied ${command_count} supplemental configuration command(s)."
+}
+
+apply_ssh_authorized_key() {
+    local authorized_key="$1"
+    local key_type
+    local key_data
+    local ignored_comment
+
+    if [[ -z "$authorized_key" ]]; then
+        return 0
+    fi
+    if [[ "$authorized_key" == *$'\n'* || "$authorized_key" == *$'\r'* ]]; then
+        fail "guestinfo.ssh_authorized_key must contain one OpenSSH public key"
+    fi
+
+    read -r key_type key_data ignored_comment <<<"$authorized_key"
+    case "$key_type" in
+        ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|ssh-dss|ssh-ed25519|ssh-rsa)
+            ;;
+        *)
+            fail "guestinfo.ssh_authorized_key uses an unsupported key type"
+            ;;
+    esac
+    if [[ -z "$key_data" ]] \
+        || ! printf '%s' "$key_data" | base64 --decode >/dev/null 2>&1; then
+        fail "guestinfo.ssh_authorized_key contains invalid key data"
+    fi
+
+    log "Installing the bootstrap SSH public key for the vyos account."
+    set system login user vyos authentication public-keys bootstrap type "$key_type" \
+        || fail "VyOS rejected the guestinfo.ssh_authorized_key type"
+    set system login user vyos authentication public-keys bootstrap key "$key_data" \
+        || fail "VyOS rejected guestinfo.ssh_authorized_key"
+}
+
 log "Reading VMware guestinfo vApp environment."
 OVF_ENV="$(vmtoolsd --cmd 'info-get guestinfo.ovfEnv' 2>/dev/null || true)"
 if [[ -z "$OVF_ENV" || "$OVF_ENV" == *"No value found"* || "$OVF_ENV" != *"<Environment"* ]]; then
@@ -157,6 +261,10 @@ DOMAIN_VALUE="$(get_ovf_property domain)"
 NTP_VALUE="$(get_ovf_property ntp)"
 VLAN_VALUE="$(get_ovf_property vlan)"
 SSH_VALUE="$(get_ovf_property ssh)"
+SSH_AUTHORIZED_KEY_VALUE="$(get_ovf_property ssh_authorized_key)"
+REST_VALUE="$(get_ovf_property rest)"
+REST_API_KEY_VALUE="$(get_ovf_property rest_api_key)"
+CONFIG_BASE64_VALUE="$(get_ovf_property config_base64)"
 
 HOSTNAME_VALUE="${HOSTNAME_VALUE:-vyos}"
 NETMASK_VALUE="${NETMASK_VALUE:-24}"
@@ -173,6 +281,10 @@ fi
 log "Opening VyOS configuration session."
 configure || fail "VyOS configuration session could not be opened"
 log "VyOS configuration session opened."
+
+# Supplemental commands are applied first. Dedicated properties below are the
+# stable appliance contract and therefore take precedence on conflicting paths.
+apply_extra_config "$CONFIG_BASE64_VALUE"
 
 log "Applying guestinfo.hostname as '${HOSTNAME_VALUE}'."
 set system host-name "$HOSTNAME_VALUE" \
@@ -231,10 +343,29 @@ if [[ -n "$PASSWORD_VALUE" ]]; then
         || fail "VyOS rejected guestinfo.password"
 fi
 
+apply_ssh_authorized_key "$SSH_AUTHORIZED_KEY_VALUE"
+
 if is_true "$SSH_VALUE"; then
     set service ssh port 22 || fail "VyOS rejected guestinfo.ssh"
 else
     delete service ssh || true
+fi
+
+# Like SSH, REST uses VyOS's default listen-address behavior. Deployments that
+# need interface-specific exposure can constrain service ssh/service https in
+# guestinfo.config_base64.
+if is_true "$REST_VALUE"; then
+    if [[ -z "$REST_API_KEY_VALUE" ]]; then
+        fail "guestinfo.rest_api_key is required when guestinfo.rest is enabled"
+    fi
+    log "Enabling the VyOS REST API."
+    set service https api keys id "$REST_API_ID" key "$REST_API_KEY_VALUE" \
+        || fail "VyOS rejected guestinfo.rest_api_key"
+    set service https api rest \
+        || fail "VyOS rejected guestinfo.rest"
+else
+    delete service https api rest || true
+    delete service https api keys id "$REST_API_ID" || true
 fi
 
 log "Committing first-boot configuration."

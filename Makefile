@@ -8,7 +8,7 @@ show-config:
 
 test:
 	python3 -m unittest discover -s tests -v
-	python3 -m compileall -q scripts tests
+	python3 -m compileall -q scripts tests files/parse-config.py
 	bash -n build.sh upload.sh docker/run-build.sh files/vapp-init.sh files/vyos-postconfig-bootup.script
 
 dependencies:

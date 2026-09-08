@@ -48,6 +48,8 @@ from VyOS sources and adds first-boot configuration through vApp properties.
 - Do not add legacy property aliases unless a migration requirement is agreed.
 - vApp values must be passed to VyOS CLI functions as quoted arguments and
   must never be evaluated as shell code.
+- Supplemental configuration must be parsed into arguments, accept only
+  `set` and `delete`, and be applied before dedicated vApp properties.
 
 ## Testing
 
@@ -55,7 +57,7 @@ Run before committing:
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m compileall -q scripts tests
+python3 -m compileall -q scripts tests files/parse-config.py
 bash -n build.sh upload.sh docker/run-build.sh files/vapp-init.sh files/vyos-postconfig-bootup.script
 ```
 

@@ -26,10 +26,25 @@ class SecurityContractTests(unittest.TestCase):
             "mgmt_mask",
             "mgmt_gw",
             "enable_rest",
-            "rest_api_key",
             "config_blob",
         ):
             self.assertNotIn(legacy_name, script)
+
+    def test_management_services_share_listen_address_behavior(self) -> None:
+        script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
+        self.assertIn("set service ssh port 22", script)
+        self.assertIn("set service https api rest", script)
+        self.assertNotIn("set service ssh listen-address", script)
+        self.assertNotIn("set service https listen-address", script)
+
+    def test_first_boot_script_does_not_log_supplemental_config_or_rest_key(self) -> None:
+        script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
+        self.assertNotRegex(script, r'log\s+.*\$CONFIG_BASE64_VALUE')
+        self.assertNotRegex(script, r'log\s+.*\$REST_API_KEY_VALUE')
+        self.assertLess(
+            script.index('apply_extra_config "$CONFIG_BASE64_VALUE"'),
+            script.index('set system host-name "$HOSTNAME_VALUE"'),
+        )
 
     def test_first_boot_script_does_not_wait_for_its_parent_service(self) -> None:
         script = (PROJECT_ROOT / "files" / "vapp-init.sh").read_text(encoding="utf-8")
@@ -77,13 +92,19 @@ class SecurityContractTests(unittest.TestCase):
                 "ntp",
                 "vlan",
                 "ssh",
+                "ssh_authorized_key",
+                "rest",
+                "rest_api_key",
+                "config_base64",
             },
         )
         secret_properties = [item for item in template["properties"] if item.get("password")]
         ssh_property = next(item for item in template["properties"] if item["key"] == "ssh")
+        rest_property = next(item for item in template["properties"] if item["key"] == "rest")
         self.assertTrue(secret_properties)
         self.assertTrue(all(item.get("value", "") == "" for item in secret_properties))
         self.assertEqual(ssh_property["value"], "false")
+        self.assertEqual(rest_property["value"], "false")
 
 
 if __name__ == "__main__":
